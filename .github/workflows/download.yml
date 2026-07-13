@@ -1,0 +1,55 @@
+name: Download PDFs
+
+on:
+  push:
+    paths:
+      - 'files.txt'
+      - 'config.env'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load config
+        run: source config.env && echo "BASEURL=$BASEURL" >> $GITHUB_ENV && echo "USER_AGENT=$USER_AGENT" >> $GITHUB_ENV
+
+      - name: Download PDFs
+        run: |
+          total=$(grep -c . files.txt)
+          count=0
+          while IFS='|' read -r folder filename; do
+            [[ -z "$filename" ]] && continue
+            count=$((count + 1))
+            mkdir -p "pdfs/$folder"
+            echo "[$count/$total] $folder/$filename"
+            curl -sL --fail \
+              -H "user-agent: $USER_AGENT" \
+              -o "pdfs/$folder/$filename" \
+              "${BASEURL}${filename}" || echo "FAILED: $filename"
+          done < files.txt
+          echo "Downloaded $(find pdfs -name '*.pdf' | wc -l) files"
+
+      - name: Zip PDFs
+        run: cd pdfs && zip -r ../jkp-books.zip . && cd .. && echo "Created jkp-books.zip ($(du -h jkp-books.zip | cut -f1))"
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jkp-books
+          path: jkp-books.zip
+          retention-days: 30
+
+      - name: Create release
+        if: github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: JKP Books - Run ${{ github.run_number }}
+          files: jkp-books.zip
+          make_latest: true
